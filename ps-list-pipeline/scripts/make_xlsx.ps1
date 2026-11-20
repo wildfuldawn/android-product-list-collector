@@ -55,6 +55,14 @@ if (-not $Rows -or $Rows.Count -eq 0) { throw '没有数据：请用 -Csv / -Row
 
 # 列名（按第一条的属性顺序）
 $headers = @($Rows[0].PSObject.Properties.Name)
+if (-not $Widths) {
+    $Widths = @($headers | ForEach-Object {
+        switch ($_) {
+            '序号' { 7 }; '应用' { 11 }; '标题' { 50 }; '店铺' { 24 }
+            '首图' { 25 }; '图片说明' { 38 }; default { 14 }
+        }
+    })
+}
 
 # ---------- 工具 ----------
 function Esc([string]$s) {
@@ -112,7 +120,7 @@ $sb = New-Object System.Text.StringBuilder
 [void]$sb.Append('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">')
 
 if ($FreezeHeader) {
-    [void]$sb.Append('<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>')
+    [void]$sb.Append('<sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>')
 } else {
     [void]$sb.Append('<sheetViews><sheetView workbookViewId="0"/></sheetViews>')
 }
@@ -129,7 +137,7 @@ if ($Widths) {
 [void]$sb.Append('<sheetData>')
 
 # 表头
-[void]$sb.Append('<row r="1">')
+[void]$sb.Append('<row r="1" ht="28" customHeight="1">')
 for ($c = 1; $c -le $headers.Count; $c++) {
     $ref = (ColLetter $c) + '1'
     [void]$sb.Append("<c r=`"$ref`" s=`"1`" t=`"inlineStr`"><is><t xml:space=`"preserve`">$(Esc $headers[$c-1])</t></is></c>")
@@ -142,14 +150,19 @@ for ($r = 0; $r -lt $Rows.Count; $r++) {
     # 有图的行给个行高
     $imgRow = $images | Where-Object { $_.row -eq $rowNum } | Select-Object -First 1
     if ($imgRow) {
-        [void]$sb.Append("<row r=`"$rowNum`" ht=`"$([math]::Round(($imgRow.h + 6) / 0.75, 1))`" customHeight=`"1`">")
+        [void]$sb.Append("<row r=`"$rowNum`" ht=`"$([math]::Round(($imgRow.h + 6) * 0.75, 1))`" customHeight=`"1`">")
     } else {
         [void]$sb.Append("<row r=`"$rowNum`">")
     }
     for ($c = 1; $c -le $headers.Count; $c++) {
         $ref = (ColLetter $c) + $rowNum
         $v = [string]$Rows[$r].($headers[$c-1])
+        if ($c -eq $imgColIdx) { $v='' } # Embedded picture, never expose a temporary file path.
         if ([string]::IsNullOrEmpty($v)) { [void]$sb.Append("<c r=`"$ref`"/>"); continue }
+        if ($headers[$c-1] -eq '价格' -and $v -match '^[¥￥]([0-9]+(?:\.[0-9]+)?)$') {
+            [void]$sb.Append("<c r=`"$ref`" s=`"2`"><v>$($Matches[1])</v></c>")
+            continue
+        }
         $num = 0.0
         if ([double]::TryParse($v, [ref]$num) -and $v -notmatch '^0\d') {
             [void]$sb.Append("<c r=`"$ref`"><v>$v</v></c>")
@@ -218,6 +231,32 @@ $workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xm
 $wbRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'
 
 $styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F9D8F"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'
+
+# Keep titles readable and prices sortable; preserve the existing OOXML writer.
+[xml]$styleDoc=$styles
+$styleNs='http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+$numFmts=$styleDoc.CreateElement('numFmts',$styleNs)
+$numFmts.SetAttribute('count','1')
+$currencyFmt=$styleDoc.CreateElement('numFmt',$styleNs)
+$currencyFmt.SetAttribute('numFmtId','164')
+$currencyFmt.SetAttribute('formatCode','"¥"0.00')
+$null=$numFmts.AppendChild($currencyFmt)
+$null=$styleDoc.DocumentElement.PrependChild($numFmts)
+$cellXfs=$styleDoc.styleSheet.cellXfs
+foreach ($xf in @($cellXfs.xf)) {
+    $alignment=$styleDoc.CreateElement('alignment',$styleNs)
+    $alignment.SetAttribute('vertical','center')
+    $alignment.SetAttribute('wrapText','1')
+    if ($xf.fontId -eq '1') { $alignment.SetAttribute('horizontal','center') }
+    $null=$xf.AppendChild($alignment)
+    $xf.SetAttribute('applyAlignment','1')
+}
+$currencyXf=$cellXfs.xf[0].CloneNode($true)
+$currencyXf.SetAttribute('numFmtId','164')
+$currencyXf.SetAttribute('applyNumberFormat','1')
+$null=$cellXfs.AppendChild($currencyXf)
+$cellXfs.SetAttribute('count','3')
+$styles=$styleDoc.OuterXml
 
 $sheetRels = $null
 if ($images.Count -gt 0) {

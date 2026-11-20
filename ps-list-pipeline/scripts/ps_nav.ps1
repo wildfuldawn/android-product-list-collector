@@ -12,24 +12,31 @@ param(
     [string]$AdbPath = ''
 )
 
-$ErrorActionPreference = 'Continue'
+$ErrorActionPreference = 'Stop'
+if ($Keyword -notmatch '^[A-Za-z0-9 _.-]+$') {
+    throw '自动输入只支持字母、数字、空格、点、横线和下划线；其他关键词请手动搜索后使用 -NoNav'
+}
 
 function Find-Adb {
     if ($AdbPath -and (Test-Path $AdbPath)) { return $AdbPath }
     if ($env:ADB_PATH -and (Test-Path $env:ADB_PATH)) { return $env:ADB_PATH }
-    $built = 'D:\Codex\pachong\android-touch-script\tools\android-sdk\platform-tools\adb.exe'
-    if (Test-Path $built) { return $built }
     $cmd = Get-Command adb -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
     throw '找不到 adb'
 }
 $script:ADB = Find-Adb
 
-function Adb { param([string[]]$A) return ((& $script:ADB @A 2>&1) | ForEach-Object { "$_" }) -join "`n" }
+function Adb {
+    param([string[]]$A)
+    $ErrorActionPreference='Continue' # PS 5.1 wraps native stderr even on exit 0.
+    $result=((& $script:ADB @A 2>&1) | ForEach-Object { "$_" }) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw "ADB 执行失败：$result" }
+    return $result
+}
 function Tap([int]$x, [int]$y) { $null = Adb @('shell', "input tap $x $y") }
 function TypeText([string]$s) { $null = Adb @('shell', "input text `"$s`"") }
 function PressEnter { $null = Adb @('shell', 'input keyevent 66') }
-function Fg { return (Adb @('shell', 'dumpsys window | grep -m1 mCurrentFocus')) }
+function Fg { return ((Adb @('shell', 'dumpsys window')) -split "`n" | Where-Object { $_ -match 'mCurrentFocus=' }) }
 
 function GetNodes {
     $xml = ''
@@ -103,11 +110,13 @@ switch ($App) {
         $null = Adb @('shell', 'monkey -p com.shizhuang.duapp -c android.intent.category.LAUNCHER 1')
         Start-Sleep -Seconds 4.5
         $ns = GetNodes
-        $entry = FindNode $ns '搜索' 340
-        if ($entry) { $null = TapNode $entry; Start-Sleep -Seconds 2.5 }
+        # The home-page search button and input area have different actions.
+        # Open the input area instead of submitting the suggested query.
+        Tap 450 220
+        Start-Sleep -Seconds 2.5
         $ns = GetNodes
         $box = FindEditText $ns 340
-        if (-not $box) { $box = FindNode $ns '搜索' 340 180 }
+        if (-not $box) { throw '得物未打开搜索输入框，请手动搜索后用 -NoNav' }
         $null = TapNode $box
         Start-Sleep -Milliseconds 1200
         ClearAndType $Keyword
@@ -165,5 +174,7 @@ switch ($App) {
     }
 }
 
+$verified = @(GetNodes | Where-Object { $_.y1 -lt 480 -and ($_.text -eq $Keyword -or $_.desc -eq $Keyword) })
+if (-not $verified.Count) { throw '搜索词未出现在结果页顶部，已停止；请手动搜索后使用 -NoNav' }
 Write-Output "前台: $(Fg)"
 Write-Output '导航完成'

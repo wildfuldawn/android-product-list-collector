@@ -21,8 +21,7 @@ cd scripts
 
 ```
 out\<App>_<时间>.xlsx     ← 带首图的表格，直接双击打开
-out\<App>_<时间>.csv
-out\imgs\<App>\*.jpg
+成功后只保留上述 xlsx，CSV 和图片临时目录自动清理。
 ```
 
 ## 更稳的用法（推荐）
@@ -49,4 +48,9 @@ out\imgs\<App>\*.jpg
 
 - `.ps1` 必须是 **UTF-8 with BOM**，否则 PowerShell 5.1 读中文会报语法错（本目录已带）
 - 中文关键词不能用 `adb shell input text`，需 ADBKeyboard 或手工输入
+- 连续四屏实际无新增时停止；数量不足时文件名带“部分”。达到目标不会额外裁图。
+- `ps_collect.ps1` 是分步调试入口，会保留 CSV 和图片。续采时使用相同 `-Csv`、`-ImageDir`，加 `-Resume`，`-Limit` 是累计目标数量，手机需手动停在所需结果页。
+- `run_all.ps1 -KeepData` 可在成功后保留核查数据，默认只留 Excel；失败时保留进度，成功出表后才清理。
+- 图片已嵌入，移动 Excel 后仍可查看。浮层遮挡仍可能出现在屏幕裁图中。
+- `-KeepScreen` 保存每屏 XML/PNG；`-ReplayDir` 可离线回放配对文件，均用于开发核查。
 - 详细字段、坑、验收见 `SKILL.md`

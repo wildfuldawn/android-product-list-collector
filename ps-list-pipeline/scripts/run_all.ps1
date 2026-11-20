@@ -1,56 +1,44 @@
-﻿# run_all.ps1 -- 一条命令跑完：导航 → 采集 → 出带图 Excel（零 Python）
-#
-# 用法：
-#   .\run_all.ps1 -App dewu -Keyword Nike  -Limit 20
-#   .\run_all.ps1 -App xhs  -Keyword adidas -Limit 20
-#   .\run_all.ps1 -App dy   -Keyword ai     -Limit 20
-#
-# 产物：
-#   out\<App>_<时间>.xlsx   带图表格
-#   out\<App>_<时间>.csv    原始数据
-#   out\imgs\<App>\*.jpg    首图
-
+﻿# Default successful output is a single self-contained workbook.
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('dewu', 'xhs', 'dy')][string]$App,
-    [Parameter(Mandatory = $true)][string]$Keyword,
-    [int]$Limit = 20,
-    [string]$OutDir = 'out',
-    [switch]$NoNav,
-    [switch]$NoExcel
+    [Parameter(Mandatory=$true)][ValidateSet('dewu','xhs','dy')][string]$App,
+    [Parameter(Mandatory=$true)][string]$Keyword,
+    [ValidateRange(1,100000)][int]$Limit=50,
+    [string]$OutDir='out', [string]$AdbPath='', [string]$ReplayDir='',
+    [ValidateRange(1,10000)][int]$MaxScroll=100,
+    [switch]$NoNav, [switch]$KeepData
 )
-
-$ErrorActionPreference = 'Continue'
-$here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-
-$csv = Join-Path $OutDir "$App`_$stamp.csv"
-$imgDir = Join-Path $OutDir "imgs\$App"
-$xlsx = Join-Path $OutDir "$App`_$stamp.xlsx"
-
-if (-not $NoNav) {
-    Write-Output "=== 1/3 导航：$App / $Keyword ==="
-    & (Join-Path $here 'ps_nav.ps1') -App $App -Keyword $Keyword
-    Start-Sleep -Seconds 2
-} else {
-    Write-Output '=== 1/3 跳过导航（用当前页面）==='
-}
-
-Write-Output "=== 2/3 采集：$Limit 条 ==="
-& (Join-Path $here 'ps_collect.ps1') -App $App -Limit $Limit -Csv $csv -ImageDir $imgDir
-if (-not (Test-Path $csv)) { throw '采集失败，没有生成 CSV' }
-
-if ($NoExcel) {
-    Write-Output "=== 跳过出表 ==="
-    Write-Output "CSV: $csv"
-    return
-}
-
-Write-Output '=== 3/3 出表 ==='
-& (Join-Path $here 'make_xlsx.ps1') -Csv $csv -ImageColumn 首图 -Out $xlsx -ImageWidth 160 -FreezeHeader
-
-Write-Output ''
-Write-Output "完成："
-Write-Output "  表格 $xlsx"
-Write-Output "  数据 $csv"
-Write-Output "  图片 $imgDir"
+$ErrorActionPreference='Stop'
+$OutDir=[IO.Path]::GetFullPath($OutDir)
+$null=New-Item -ItemType Directory -Force -Path $OutDir
+$job=Join-Path $OutDir ('.work_'+$App+'_'+[guid]::NewGuid().ToString('N'))
+$null=New-Item -ItemType Directory -Path $job
+$csv=Join-Path $job 'progress.csv'
+$imgDir=Join-Path $job 'images'
+$stamp=Get-Date -Format 'yyyyMMdd_HHmmss_fff'
+$xlsx=Join-Path $OutDir ($App+'_'+$stamp+'.xlsx')
+$failure=$null
+try {
+    if (-not $NoNav -and -not $ReplayDir) {
+        & (Join-Path $PSScriptRoot 'ps_nav.ps1') -App $App -Keyword $Keyword -AdbPath $AdbPath
+    }
+    & (Join-Path $PSScriptRoot 'ps_collect.ps1') -App $App -Limit $Limit -Csv $csv -ImageDir $imgDir -AdbPath $AdbPath -MaxScroll $MaxScroll -ReplayDir $ReplayDir
+} catch { $failure=$_ }
+$rows=if (Test-Path -LiteralPath $csv) { @(Import-Csv -LiteralPath $csv -Encoding UTF8) } else { @() }
+if (-not $rows.Count) { throw "没有采到数据，进度保留在 $job。$failure" }
+if ($rows.Count -lt $Limit) { $xlsx=Join-Path $OutDir ([IO.Path]::GetFileNameWithoutExtension($xlsx)+'_部分.xlsx') }
+# Paths are internal inputs only. The public workbook contains embedded images.
+& (Join-Path $PSScriptRoot 'make_xlsx.ps1') -Csv $csv -ImageColumn 首图 -Out $xlsx -ImageWidth 160 -FreezeHeader
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip=[IO.Compression.ZipFile]::OpenRead($xlsx)
+try {
+    $embedded=@($zip.Entries | Where-Object { $_.FullName -like 'xl/media/*' }).Count
+    if ($embedded -ne $rows.Count) { throw "图片嵌入数 $embedded 与记录数 $($rows.Count) 不符，临时数据保留" }
+} finally { $zip.Dispose() }
+if (-not $failure -and -not $KeepData) {
+    $resolvedJob=[IO.Path]::GetFullPath($job)
+    $parent=[IO.Directory]::GetParent($resolvedJob).FullName
+    if ($parent -ne $OutDir -or [IO.Path]::GetFileName($resolvedJob) -notlike '.work_*') { throw '临时目录校验失败' }
+    Remove-Item -LiteralPath $resolvedJob -Recurse -Force
+} else { Write-Output "续采/核查数据：$job" }
+Write-Output "完成：$($rows.Count)/$Limit 条。Excel：$xlsx"
+if ($failure) { throw "已导出部分 Excel，采集错误：$failure" }
