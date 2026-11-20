@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+output/
+out/
+images/
+*.json
+*.xml
+*.png
+*.jpg
+*.xlsx
+*.log
+*.mp4
+*.csv
