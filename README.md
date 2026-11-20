@@ -1,45 +1,50 @@
-# 手机商品列表采集
+# 手机商品列表采集（PowerShell 版）
 
-通过 ADB 读取安卓手机上的商品搜索列表，整理为带展示图的 Excel。
-
-包含小红书、抖音的 Python pipeline，以及支持得物/小红书/抖音的 PowerShell pipeline。此仓库不包含执行录制或视频教程。
-
-## 得物与纯 PowerShell 入口
-
-只需要 Windows 自带 PowerShell/.NET 和 adb，不需要 Python 或 Office：
-
-```powershell
-cd ps-list-pipeline/scripts
-.\run_all.ps1 -App dewu -Keyword Nike -Limit 50
-```
-
-也支持 `-App xhs` 和 `-App dy`；后者的价格在无障碍树中不可见，需价格时使用下方带 OCR 的抖音 Python 版。中文关键词先在手机上手动搜索，再加 `-NoNav`。使用 `ADB_PATH` 环境变量指定 adb 路径，或将 adb 加入 PATH。
+通过 ADB 读取安卓手机上得物、小红书、抖音的商品搜索列表，保存商品信息与首图，导出带图 Excel。只需 Windows 自带的 PowerShell/.NET 和 ADB，**无需安装 Python 或 Office**。
 
 ## 环境
 
-- Windows、Python 3.10+、Android Platform Tools（adb 在 PATH 中）。
-- 手机已开启 USB 或无线调试，并由用户确认连接；目标 App 已登录。
-- `python -m pip install -r requirements.txt`。
-- 抖音价格等自绘文字依赖 Windows OCR 及简体中文识别语言。
+- Windows 10/11，使用系统自带的 PowerShell 5.1。
+- Android Platform Tools：将 adb 加入 PATH，或通过 `ADB_PATH` 环境变量指定 adb.exe 的完整路径。
+- 手机已开启 USB 或无线调试，并由用户确认连接；目标 App 已登录，手机保持亮屏、解锁。
 
-## 小红书
+先执行 `adb devices`，确认手机状态为 `device`。
 
-```powershell
-cd xhs-list-pipeline/scripts
-python collect_list.py --keyword nike --limit 50 --out xhs_result.json
-python build_list_xlsx.py --json xhs_result.json --out xhs_result.xlsx
-```
+## 开始采集
 
-## 抖音
+在项目根目录打开 PowerShell：
 
 ```powershell
-cd dy-list-pipeline/scripts
-python dy_collect.py --keyword nike --limit 50 --out dy_result.json
-python dy_build_xlsx.py --json dy_result.json --out dy_result.xlsx
+cd ps-list-pipeline/scripts
+
+# 得物：采集 50 条
+.\run_all.ps1 -App dewu -Keyword Nike -Limit 50
+
+# 小红书：采集 50 条
+.\run_all.ps1 -App xhs -Keyword adidas -Limit 50
+
+# 抖音：采集 50 条
+.\run_all.ps1 -App dy -Keyword nike -Limit 50
 ```
 
-`--limit` 指定目标条数。手机列表按屏幕滑动，脚本按新增商品继续采集，`--max-scroll` 限制最大滑动次数。中文关键词需先在手机上手动搜索并进入商品页，再使用 `--no-nav`。商品不足或字段不显示时不能保证达到目标或字段齐全。
+`-Limit` 指定目标条数，程序滑动列表继续采集。商品不足或页面解析失败时，实际条数可能小于目标。
 
-详细参数与解析原理见各目录 `SKILL.md`。这些文件是项目使用文档，其中的历史设备测试与覆盖率是原始记录，本次未重新做手机实测。
+中文关键词请先在手机上手动搜索并进入商品结果页，再加 `-NoNav`，例如：
 
-当前解析坐标针对原设备屏幕，换手机或 App 布局变化时需校准；本次仅完成源码整理与 Python 语法检查。设备连接信息、截图、采集结果均不应上传。
+```powershell
+.\run_all.ps1 -App dewu -Keyword x -Limit 50 -NoNav
+```
+
+此时 `-Keyword` 只是必填占位参数，程序使用手机当前页面，不重新搜索。
+
+## 输出
+
+默认输出在运行目录的 `out/`：带首图的 `.xlsx`、原始 `.csv` 和 `imgs/<App>/` 图片目录。不需要安装 Excel 来生成文件。
+
+## 字段与适用范围
+
+采集商品标题、列表上可读取的价格、已售和首图。**抖音部分价格属于自绘文字，无障碍树无法读取，此版本会留空。** 不提供 OCR 补充工具。
+
+当前坐标针对原设备屏幕，换手机或 App 布局变化时需校准。本次完成 PowerShell 语法检查，未重新进行手机实时采集验证。
+
+更多参数和解析原理见 [快速开始](ps-list-pipeline/README.md) 与 [使用文档](ps-list-pipeline/SKILL.md)。设备连接信息、截图、采集结果不应上传。
