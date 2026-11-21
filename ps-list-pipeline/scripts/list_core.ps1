@@ -10,7 +10,7 @@ function Test-Quote([string]$Text) {
     return $Text.Length -lt 80 -and ($Text -match '^[“"「]|[”"」]$')
 }
 function Test-Shop([string]$Text) {
-    return $Text.Length -le 22 -and $Text -match '店$' -and $Text -notmatch '销量|已售|[¥￥]'
+    return $Text.Length -le 22 -and $Text -match '店$' -and $Text -notmatch '销量|已售|[¥￥]|\d+\s*年老店|好评率'
 }
 function Read-ListNodes([string]$XmlText) {
     $start=$XmlText.IndexOf('<hierarchy')

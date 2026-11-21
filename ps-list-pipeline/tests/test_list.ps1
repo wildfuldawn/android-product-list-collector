@@ -7,6 +7,8 @@ $dir=Join-Path ([IO.Path]::GetTempPath()) ('product-list-test-'+[guid]::NewGuid(
 $frames=Join-Path $dir 'frames'
 $null=New-Item -ItemType Directory -Path $frames -Force
 try {
+    Assert (-not (Test-Shop '3年老店')) '店龄标签不能作为店铺名'
+    Assert (Test-Shop '欧阳袜哈的店') '真实店名不能被店龄过滤误伤'
     $xml='<hierarchy><node text="近期店铺销量TOP3" bounds="[52,1230][593,1282]"/>'+
         '<node text="&quot;这个材料还是不错的&quot;" bounds="[52,1293][593,1345]"/>'+
         '<node text="测试女款秋冬纯棉袜子" bounds="[52,1359][593,1430]"/>'+
