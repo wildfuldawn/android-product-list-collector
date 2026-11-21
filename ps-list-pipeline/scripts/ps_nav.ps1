@@ -9,7 +9,7 @@
 param(
     [Parameter(Mandatory = $true)][ValidateSet('dewu', 'xhs', 'dy')][string]$App,
     [Parameter(Mandatory = $true)][string]$Keyword,
-    [string]$AdbPath = ''
+    [string]$AdbPath = '', [string]$Serial = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,6 +29,7 @@ $script:ADB = Find-Adb
 function Adb {
     param([string[]]$A)
     $ErrorActionPreference='Continue' # PS 5.1 wraps native stderr even on exit 0.
+    if ($Serial) { $A=@('-s',$Serial)+$A }
     $result=((& $script:ADB @A 2>&1) | ForEach-Object { "$_" }) -join "`n"
     if ($LASTEXITCODE -ne 0) { throw "ADB 执行失败：$result" }
     return $result

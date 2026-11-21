@@ -2,13 +2,14 @@
 param(
     [Parameter(Mandatory=$true)][ValidateSet('dewu','xhs','dy')][string]$App,
     [ValidateRange(1,100000)][int]$Limit=50,
-    [string]$Csv='', [string]$ImageDir='', [string]$AdbPath='',
+    [string]$Csv='', [string]$ImageDir='', [string]$AdbPath='', [string]$Serial='',
     [ValidateRange(1,10000)][int]$MaxScroll=100,
-    [switch]$KeepScreen, [switch]$Resume, [string]$ReplayDir=''
+    [switch]$KeepScreen, [switch]$Resume, [string]$ReplayDir='', [string]$LayoutFile=''
 )
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
 . (Join-Path $PSScriptRoot 'list_core.ps1')
+$layoutProfile=if ($LayoutFile) { Get-Content -LiteralPath $LayoutFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 if (-not $Csv) { $Csv="$App.csv" }
 $Csv=[IO.Path]::GetFullPath($Csv)
 if (-not $ImageDir) { $ImageDir=Join-Path (Split-Path -Parent $Csv) ([IO.Path]::GetFileNameWithoutExtension($Csv)+'_images') }
@@ -27,13 +28,16 @@ if ($rows.Count -ge $Limit) { Write-Output "已有 $($rows.Count) 条，已达�
 $null=New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Csv),$ImageDir
 function Invoke-Adb([string[]]$Arguments) {
     $ErrorActionPreference='Continue'
+    if ($Serial) { $Arguments=@('-s',$Serial)+$Arguments }
     $output=(& $script:ADB @Arguments 2>&1 | ForEach-Object { "$_" }) -join "`n"
     if ($LASTEXITCODE -ne 0) { throw "ADB 执行失败：$output" }
     return $output
 }
 function Save-AdbScreen([string]$Path) {
     $psi=New-Object Diagnostics.ProcessStartInfo
-    $psi.FileName=$script:ADB; $psi.Arguments='exec-out screencap -p'
+    $psi.FileName=$script:ADB
+    if ($Serial -and $Serial -notmatch '^[A-Za-z0-9_.:-]+$') { throw '无效的设备编号' }
+    $psi.Arguments=if ($Serial) { '-s '+$Serial+' exec-out screencap -p' } else { 'exec-out screencap -p' }
     $psi.RedirectStandardOutput=$true; $psi.RedirectStandardError=$true
     $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true
     $p=[Diagnostics.Process]::Start($psi)
@@ -49,12 +53,12 @@ if ($ReplayDir) {
     $frames=@(Get-ChildItem -LiteralPath $ReplayDir -Filter '*.xml' -File | Sort-Object Name)
     if (-not $frames.Count) { throw '回放目录没有 XML/PNG 配对数据' }
 } else {
-    if ($AdbPath -and (Test-Path -LiteralPath $AdbPath)) { $script:ADB=$AdbPath }
-    elseif ($env:ADB_PATH -and (Test-Path -LiteralPath $env:ADB_PATH)) { $script:ADB=$env:ADB_PATH }
-    elseif (Get-Command adb -ErrorAction SilentlyContinue) { $script:ADB=(Get-Command adb).Source }
-    else { throw '找不到 adb，请用 -AdbPath 或 ADB_PATH 指定 adb.exe' }
-    $devices=Invoke-Adb @('devices')
-    if (@([regex]::Matches($devices,'(?m)^\S+\s+device\s*$')).Count -ne 1) { throw '需要连接且仅连接一台已授权手机' }
+    . (Join-Path $PSScriptRoot 'device.ps1')
+    $script:ADB=Find-ProductAdb $AdbPath
+    $devices=Invoke-ProductAdb $script:ADB @('devices')
+    if ($Serial) {
+        if ($devices -notmatch ('(?m)^'+[regex]::Escape($Serial)+'\s+device\s*$')) { throw '选定的手机未连接或未授权' }
+    } elseif (@([regex]::Matches($devices,'(?m)^\S+\s+device\s*$')).Count -ne 1) { throw '请连接一台已授权手机，或用 -Serial 选择设备' }
 }
 $noNew=0
 Save-ListCheckpoint $rows.ToArray() $Csv
@@ -74,19 +78,22 @@ try {
         $img=$null
         try {
             $nodes=@(Read-ListNodes $xmlText)
-            if (-not $ReplayDir -and $App -eq 'dewu' -and -not @($nodes | Where-Object { $_.t -eq '商品' -and $_.y1 -lt 500 }).Count) {
-                throw '当前不是得物商品搜索结果页，停止以免采到推荐页'
-            }
-            $cards=@(Get-ListCards $nodes $App)
             $img=[Drawing.Image]::FromFile($shot)
-            if ($img.Width -ne 1272 -or $img.Height -ne 2772) { throw '屏幕尺寸需为 1272x2772，请先校准坐标' }
             if ($owned -and $KeepScreen) { [IO.File]::WriteAllText([IO.Path]::ChangeExtension($shot,'.xml'),$xmlText) }
+            if ($img.Width -ge $img.Height) { throw '请将手机转为竖屏，并进入双列商品搜索结果页' }
+            if ($layoutProfile) { Set-ProductLayoutProfile $layoutProfile $App $img.Width $img.Height }
+            $referenceHeight=[int][Math]::Round($img.Height*1272.0/$img.Width)
+            $nodes=@(ConvertTo-ReferenceNodes $nodes $img.Width)
+            $headerLimit=(Get-ListConfig $App).headerY+80
+            if (-not $ReplayDir -and -not @($nodes | Where-Object { $_.t -eq '商品' -and $_.y1 -lt $headerLimit }).Count) { throw '未识别到商品页签，请先在手机手动进入商品搜索结果页' }
+            $cards=@(Get-ListCards $nodes $App)
             $added=0; $skipped=0
             foreach ($c in $cards) {
                 if ($rows.Count -ge $Limit) { break }
                 if ($seen.ContainsKey($c.t)) { continue }
-                $box=Get-ListImageBox $c $App $img.Width $img.Height
+                $box=Get-ListImageBox $c $App 1272 $referenceHeight
                 if (-not $box) { $skipped++; continue }
+                $box=ConvertTo-DeviceBox $box $img.Width $img.Height
                 $index=$rows.Count+1
                 $out=Join-Path $ImageDir ('{0:D3}_{1}.png' -f $index,[guid]::NewGuid().ToString('N'))
                 $bitmap=New-Object Drawing.Bitmap($box.w,$box.h)
@@ -108,13 +115,14 @@ try {
             }
             Write-Output "第 $screen 屏：实际新增 $added，累计 $($rows.Count)/$Limit；不完整图片跳过 $skipped"
             $noNew=if ($added) { 0 } else { $noNew+1 }
+            $swipeX=[int]($img.Width/2); $swipeFrom=[int]($img.Height*0.76); $swipeTo=[int]($img.Height*0.51)
         } finally {
             if ($img) { $img.Dispose() }
             if ($owned -and -not $KeepScreen -and (Test-Path -LiteralPath $shot)) { Remove-Item -LiteralPath $shot -Force }
         }
         if ($rows.Count -ge $Limit -or $noNew -ge 4) { break }
         if (-not $ReplayDir) {
-            $null=Invoke-Adb @('shell','input swipe 636 2100 636 1400 300')
+            $null=Invoke-Adb @('shell',"input swipe $swipeX $swipeFrom $swipeX $swipeTo 300")
             Start-Sleep -Milliseconds 2200
         }
     }

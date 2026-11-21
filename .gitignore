@@ -13,3 +13,8 @@ images/
 *.log
 *.mp4
 *.csv
+tools/
+tmp/
+dist/
+.agent-work/
+结果/

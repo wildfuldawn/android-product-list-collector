@@ -1,60 +1,42 @@
-# 手机商品列表采集（PowerShell 版）
+# 手机商品采集 Agent 工作流（免 Python）
 
-通过 ADB 读取安卓手机上得物、小红书、抖音的商品搜索列表，保存商品信息与首图，导出带图 Excel。只需 Windows 自带的 PowerShell/.NET 和 ADB，**无需安装 Python 或 Office**。
+把整个分享包交给 AI 助手，由它检查当前手机、分析截图和页面结构、试采验证并适配，再按指定数量采集小红书、得物、抖音商品搜索列表，最终输出一个内嵌图片的 Excel。只采列表，不进入详情。
 
-## 环境
+## 给别人的 AI 这样说
 
-- Windows 10/11，使用系统自带的 PowerShell 5.1。
-- Android Platform Tools：将 adb 加入 PATH，或通过 `ADB_PATH` 环境变量指定 adb.exe 的完整路径。
-- 手机已开启 USB 或无线调试，并由用户确认连接；目标 App 已登录，手机保持亮屏、解锁。
+> 请先阅读这个文件夹的 AGENTS.md 和 ps-list-pipeline/SKILL.md，按里面的工作流操作。我要采集【小红书】搜索【袜子】的【50】条商品。请分析我当前连接的手机，先试采最多 3 条，对照截图核验标题、价格和图片，再适配并继续采集。使用随包 PowerShell 执行器，不安装或依赖 Python。最终只交付一个带图 Excel；遇到手机授权、登录或工具安全拦截时，说明具体原因。
 
-先执行 `adb devices`，确认手机状态为 `device`。
+请替换平台、关键词和数量。各 Agent 是否自动发现 SKILL.md 不同，不能假定放进文件夹就会自动生效，因此提示词明确要求先读入口。
 
-## 开始采集
+## 接收者需要什么
 
-双击根目录的 `启动采集.cmd`，选择平台、输入搜索词和数量。手机已手动进入商品搜索结果时，搜索词直接回车即可使用当前页面。中文搜索词请在手机上输入。
+- Windows 10/11、系统自带的 Windows PowerShell 5.1/.NET；无需 Python、Office 或云端 OCR。
+- 安卓手机，已打开 USB/无线调试并授权，目标 App 已登录，竖屏、解锁。
+- 完整解压分享 ZIP，包中包含 ADB、配套 DLL 和许可证。只有 GitHub 源码时，需先提供 Android Platform Tools，或用 `ADB_PATH`/`-AdbPath` 指定工具。
+- AI 需具备本地文件、截图读取和被允许的命令执行能力。有企业策略或 Agent 工具安全限制时可能无法全自动运行；不能通过隐藏命令或换解释器绕过。
 
-在项目根目录打开 PowerShell：
+## 工作流与不同手机
 
-```powershell
-cd ps-list-pipeline/scripts
+入口是 [SKILL.md](ps-list-pipeline/SKILL.md)。执行器按实际屏幕宽度换算坐标，Agent 再根据当前截图/XML 判断布局是否相同；不同时生成该手机的布局配置，必要时局部修正解析器并重新试采。
 
-# 得物：采集 50 条
-.\run_all.ps1 -App dewu -Keyword Nike -Limit 50
+支持的是“有证据地适配”，不是宣称所有手机自动兼容。字体/显示缩放、App 版本、单列/多列、横屏、折叠屏布局都可能改变规则。模拟分辨率测试通过不等于真机适配完成。店铺未展示或抖音自绘价格不可读时留空；浮层遮挡不伪造像素。
 
-# 小红书：采集 50 条
-.\run_all.ps1 -App xhs -Keyword adidas -Limit 50
+## 不用 AI 也能运行
 
-# 抖音：采集 50 条
-.\run_all.ps1 -App dy -Keyword nike -Limit 50
-```
+双击 `启动采集.cmd`，按提示连接/选择手机，先在手机手动搜索并进入商品双列结果页，再输入数量。换手机后默认先试 3 条，自己检查 Excel；发现不匹配时交给 AI 按工作流适配。正式执行成功后仅保留 Excel；异常时保留检查点，目标不足的文件名带“部分”。
 
-`-Limit` 指定目标条数，程序滑动列表继续采集。商品不足或页面解析失败时，实际条数可能小于目标。
+旧的自动导航脚本使用参考坐标，跨设备工作流优先采用看图/XML导航或用户手动搜索后的 `-NoNav`。
 
-中文关键词请先在手机上手动搜索并进入商品结果页，再加 `-NoNav`，例如：
+## 开发与分享
 
 ```powershell
-.\run_all.ps1 -App dewu -Keyword x -Limit 50 -NoNav
+# 离线回归，不操作手机
+powershell.exe -NoProfile -File .\ps-list-pipeline\tests\test_list.ps1
+
+# 打包：需要完整 ADB 目录，连同许可证打进 ZIP
+.\build_share.ps1 -OutputDirectory '.\dist'
 ```
 
-此时 `-Keyword` 只是必填占位参数，程序使用手机当前页面，不重新搜索。
+打包器仅复制明确列出的工作流/源码与 ADB 组件，不复制设备配置、IP、凭据、历史截图、采集结果或临时 Python 文件。接收者不需要安装 Python；打包器自身也只依赖 PowerShell。
 
-## 输出
-
-双击入口的结果在 `ps-list-pipeline/结果/`；命令行默认在运行目录的 `out/`。成功后只保留一个带图 `.xlsx`，图片已嵌入文件，不依赖外部目录。不需要安装 Excel 来生成文件。中途出错会保留临时检查点，已有记录可续采；不足目标时文件名带“部分”。
-
-## 字段与适用范围
-
-采集商品标题、列表上可读取的价格、已售和首图。**抖音部分价格属于自绘文字，无障碍树无法读取，此版本会留空。** 不提供 OCR 补充工具。
-
-当前坐标针对 1272×2772 屏幕，换手机或 App 布局变化时需校准。2026-11-20 使用 Windows PowerShell 5.1 实机验证了小红书 6 条（3 屏）和得物 4 条；抖音本轮仅做解析回归检查，未实机重测。
-
-本轮修复：小红书评价行从其上边界排除，支持普通与中文引号；过滤 TOP、近期店铺、本周热销等促销标签；得物修正搜索入口、分隔价格数字（`¥ 4 8` → `¥48`）和图片边界。按标题去重，达到目标立即停止，每条记录保存一次检查点；相同标题的不同商品可能合并，不能据此保证完整覆盖。屏幕上的悬浮按钮可能遮挡裁图，不会伪造被遮挡像素。
-
-离线回归（不连接手机）：
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ps-list-pipeline/tests/test_list.ps1
-```
-
-更多参数和解析原理见 [快速开始](ps-list-pipeline/README.md) 与 [使用文档](ps-list-pipeline/SKILL.md)。设备连接信息、截图、采集结果不应上传。
+原设备已实采小红书 50 条。分辨率离线测试覆盖 720×1600、1080×1920、1080×2400、1440×3200，其他真机仍需试采验证。细节见 [设备适配](ps-list-pipeline/references/adaptation.md)。

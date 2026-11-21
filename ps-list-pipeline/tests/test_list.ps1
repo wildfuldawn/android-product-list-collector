@@ -2,6 +2,7 @@
 Add-Type -AssemblyName System.Drawing
 $scripts=Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts'
 . (Join-Path $scripts 'list_core.ps1')
+. (Join-Path $scripts 'device.ps1')
 function Assert($Condition,[string]$Message) { if (-not $Condition) { throw $Message } }
 $dir=Join-Path ([IO.Path]::GetTempPath()) ('product-list-test-'+[guid]::NewGuid().ToString('N'))
 $frames=Join-Path $dir 'frames'
@@ -20,11 +21,44 @@ try {
     $image=New-Object Drawing.Bitmap(1272,2772)
     try { $image.Save((Join-Path $frames '01.png'),[Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
     $cards=@(Get-ListCards @(Read-ListNodes $xml) 'xhs')
+    Assert (Test-ProductEndpoint '192.168.1.5:34567') '无线调试地址解析失败'
+    Assert (-not (Test-ProductEndpoint '999.168.1.5:99999')) '无效调试地址被接受'
     Assert ($cards.Count -eq 2) '促销词或评价被当成商品'
     Assert ($cards[0].quoteY -eq 1293) 'ASCII 引号/XML 实体未识别'
     $box=Get-ListImageBox $cards[0] 'xhs'
     Assert ($box.bottom -eq 1287 -and $box.bottom -lt 1293) '评价行被裁入图片'
+    foreach ($size in @(@(720,1600),@(1080,1920),@(1080,2400),@(1440,3200))) {
+        $width=$size[0]; $height=$size[1]; $factor=$width/1272.0
+        $scaledXml=[regex]::Replace($xml,'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',{
+            param($match)
+            'bounds="[{0},{1}][{2},{3}]"' -f [int][Math]::Round([int]$match.Groups[1].Value*$factor),[int][Math]::Round([int]$match.Groups[2].Value*$factor),[int][Math]::Round([int]$match.Groups[3].Value*$factor),[int][Math]::Round([int]$match.Groups[4].Value*$factor)
+        })
+        $scaledFrames=Join-Path $dir ("frames-$width-$height")
+        $null=New-Item -ItemType Directory -Path $scaledFrames
+        [IO.File]::WriteAllText((Join-Path $scaledFrames '01.xml'),$scaledXml)
+        $scaledImage=New-Object Drawing.Bitmap($width,$height)
+        try { $scaledImage.Save((Join-Path $scaledFrames '01.png'),[Drawing.Imaging.ImageFormat]::Png) } finally { $scaledImage.Dispose() }
+        $scaledCsv=Join-Path $dir ("scaled-$width-$height.csv")
+        & (Join-Path $scripts 'ps_collect.ps1') -App xhs -Limit 2 -Csv $scaledCsv -ReplayDir $scaledFrames
+        $scaledRows=@(Import-Csv -LiteralPath $scaledCsv)
+        Assert ($scaledRows.Count -eq 2 -and $scaledRows[0].价格 -eq '¥8.99') "分辨率 $width x $height 解析回归"
+        $checkImage=[Drawing.Image]::FromFile($scaledRows[0].首图)
+        try { Assert ([Math]::Abs($checkImage.Width-541*$factor) -le 2) '裁图没有映射回设备尺寸' } finally { $checkImage.Dispose() }
+    }
     Assert ($cards[0].price -eq '¥8.99' -and $cards[1].sold -eq '18.2万+') '两列价格/销量串行'
+    $profile=[pscustomobject]@{schemaVersion=1;app='xhs';screenWidth=1440;screenHeight=3200;layout=[pscustomobject]@{headerY=610;left=@(60,580);right=@(690,1210)}}
+    $profileFile=Join-Path $dir 'profile.json'
+    $profile | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $profileFile -Encoding UTF8
+    $profileCsv=Join-Path $dir 'profile.csv'
+    & (Join-Path $scripts 'ps_collect.ps1') -App xhs -Limit 2 -Csv $profileCsv -ReplayDir $scaledFrames -LayoutFile $profileFile
+    $profileRows=@(Import-Csv -LiteralPath $profileCsv)
+    $profileImage=[Drawing.Image]::FromFile($profileRows[0].首图)
+    try { Assert ([Math]::Abs($profileImage.Width-520*1440/1272) -le 2) '布局文件未应用到裁剪范围' } finally { $profileImage.Dispose() }
+    $profile.screenWidth=1080
+    $profile | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $profileFile -Encoding UTF8
+    $mismatch=$false
+    try { & (Join-Path $scripts 'ps_collect.ps1') -App xhs -Limit 2 -Csv (Join-Path $dir 'mismatch.csv') -ReplayDir $scaledFrames -LayoutFile $profileFile } catch { $mismatch=$true }
+    Assert $mismatch '不能把另一台屏幕的配置静默套用到当前设备'
     Assert (-not (Get-ListImageBox ([pscustomobject]@{cx=100;y1=900;quoteY=0}) 'xhs')) '顶部半图应跳过'
     foreach ($t in @('近期店铺销量top3','本周热销好物销量榜','回购榜精选商品TOP2')) {
         Assert (-not (Test-ListTitle ([pscustomobject]@{t=$t;y1=1359;w=541;h=71}) 'xhs' (Get-ListConfig 'xhs'))) '促销过滤回归'

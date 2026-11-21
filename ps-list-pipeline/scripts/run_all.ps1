@@ -3,9 +3,9 @@ param(
     [Parameter(Mandatory=$true)][ValidateSet('dewu','xhs','dy')][string]$App,
     [Parameter(Mandatory=$true)][string]$Keyword,
     [ValidateRange(1,100000)][int]$Limit=50,
-    [string]$OutDir='out', [string]$AdbPath='', [string]$ReplayDir='',
+    [string]$OutDir='out', [string]$AdbPath='', [string]$ReplayDir='', [string]$Serial='',
     [ValidateRange(1,10000)][int]$MaxScroll=100,
-    [switch]$NoNav, [switch]$KeepData
+    [switch]$NoNav, [switch]$KeepData, [string]$LayoutFile=''
 )
 $ErrorActionPreference='Stop'
 $OutDir=[IO.Path]::GetFullPath($OutDir)
@@ -19,9 +19,9 @@ $xlsx=Join-Path $OutDir ($App+'_'+$stamp+'.xlsx')
 $failure=$null
 try {
     if (-not $NoNav -and -not $ReplayDir) {
-        & (Join-Path $PSScriptRoot 'ps_nav.ps1') -App $App -Keyword $Keyword -AdbPath $AdbPath
+        & (Join-Path $PSScriptRoot 'ps_nav.ps1') -App $App -Keyword $Keyword -AdbPath $AdbPath -Serial $Serial
     }
-    & (Join-Path $PSScriptRoot 'ps_collect.ps1') -App $App -Limit $Limit -Csv $csv -ImageDir $imgDir -AdbPath $AdbPath -MaxScroll $MaxScroll -ReplayDir $ReplayDir
+    & (Join-Path $PSScriptRoot 'ps_collect.ps1') -App $App -Limit $Limit -Csv $csv -ImageDir $imgDir -AdbPath $AdbPath -MaxScroll $MaxScroll -ReplayDir $ReplayDir -Serial $Serial -LayoutFile $LayoutFile
 } catch { $failure=$_ }
 $rows=if (Test-Path -LiteralPath $csv) { @(Import-Csv -LiteralPath $csv -Encoding UTF8) } else { @() }
 if (-not $rows.Count) { throw "没有采到数据，进度保留在 $job。$failure" }
