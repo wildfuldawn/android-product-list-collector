@@ -24,6 +24,14 @@ try {
         foreach($pattern in $patterns) { Get-ChildItem -LiteralPath $source -File -Filter $pattern | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $target } }
     }
     Copy-Item -LiteralPath (Join-Path $root 'ps-list-pipeline\SKILL.md') -Destination (Join-Path $package 'ps-list-pipeline')
+    $rankTarget=Join-Path $package 'hongguo-rank-pipeline'
+    $null=New-Item -ItemType Directory -Path $rankTarget -Force
+    foreach($file in @('README.md','SKILL.md')) { Copy-Item -LiteralPath (Join-Path $root ('hongguo-rank-pipeline\'+$file)) -Destination $rankTarget }
+    foreach($dir in @('scripts','tests')) {
+        $target=Join-Path $rankTarget $dir
+        $null=New-Item -ItemType Directory -Path $target -Force
+        Get-ChildItem -LiteralPath (Join-Path $root ('hongguo-rank-pipeline\'+$dir)) -File -Filter '*.ps1' | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $target }
+    }
     $tools=Join-Path $package 'tools'
     $null=New-Item -ItemType Directory -Path $tools
     foreach($file in @('adb.exe','AdbWinApi.dll','AdbWinUsbApi.dll','NOTICE.txt')) { Copy-Item -LiteralPath (Join-Path $AdbDirectory $file) -Destination $tools }

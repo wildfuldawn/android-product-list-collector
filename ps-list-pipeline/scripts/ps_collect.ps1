@@ -72,7 +72,13 @@ try {
             $shot=[IO.Path]::ChangeExtension($frames[$screen-1].FullName,'.png')
         } else {
             $null=Invoke-Adb @('shell','uiautomator dump /sdcard/_ui.xml')
-            $xmlText=Invoke-Adb @('shell','cat /sdcard/_ui.xml')
+            # pull 到 ASCII 临时文件再按 UTF-8 读取：shell cat 会按控制台代码页解码，
+            # 中文路径也会让 adb.exe 写入失败，两者都会破坏标题/价格。
+            $uiLocal=[IO.Path]::Combine([IO.Path]::GetTempPath(),('pslist_ui_'+[guid]::NewGuid().ToString('N')+'.xml'))
+            try {
+                $null=Invoke-Adb @('pull','/sdcard/_ui.xml',$uiLocal)
+                $xmlText=[IO.File]::ReadAllText($uiLocal,[Text.Encoding]::UTF8)
+            } finally { Remove-Item -LiteralPath $uiLocal -Force -ErrorAction SilentlyContinue }
             Save-AdbScreen $shot
         }
         $img=$null

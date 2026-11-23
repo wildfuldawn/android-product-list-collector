@@ -13,9 +13,7 @@ if ($Serial -notin $devices -or $Serial -notmatch '^[A-Za-z0-9_.:-]+$') { throw 
 $OutDir=[IO.Path]::GetFullPath($OutDir)
 if (Test-Path -LiteralPath $OutDir) { throw '核查目录已存在，请使用新目录以保留旧证据' }
 $null=New-Item -ItemType Directory -Path $OutDir -Force
-$null=Invoke-ProductAdb $adb @('-s',$Serial,'shell','uiautomator dump /sdcard/_product_inspect.xml')
-$xml=Invoke-ProductAdb $adb @('-s',$Serial,'shell','cat /sdcard/_product_inspect.xml')
-[IO.File]::WriteAllText((Join-Path $OutDir 'page.xml'),$xml)
+$xml=Get-ProductUiXml $adb $Serial (Join-Path $OutDir 'page.xml') '/sdcard/_product_inspect.xml'
 $psi=New-Object Diagnostics.ProcessStartInfo
 $psi.FileName=$adb; $psi.Arguments='-s '+$Serial+' exec-out screencap -p'
 $psi.RedirectStandardOutput=$true; $psi.RedirectStandardError=$true; $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true

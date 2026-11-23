@@ -24,6 +24,21 @@ function Get-ProductDevices([string]$Adb) {
         if ($line -match '^(\S+)\s+device\s*$') { $Matches[1] }
     }
 }
+# adb shell cat 会把 UTF-8 界面文本按控制台代码页解码，中文和引号可能被破坏；
+# 统一改为 pull 到本地后按 UTF-8 读取，保证标题与价格原样进入解析器。
+function Get-ProductUiXml([string]$Adb,[string]$Serial,[string]$LocalPath,[string]$Remote='/sdcard/_product_ui.xml') {
+    $null=Invoke-ProductAdb $Adb @('-s',$Serial,'shell','uiautomator dump',$Remote)
+    # adb.exe 在中文 Windows 上按本机代码页接收路径参数，含中文的本地路径会写入失败；
+    # 统一先 pull 到 ASCII 临时文件再读，最后另存到调用方指定位置。
+    $tmp=[IO.Path]::Combine([IO.Path]::GetTempPath(),('pslist_ui_'+[guid]::NewGuid().ToString('N')+'.xml'))
+    try {
+        $pull=Invoke-ProductAdb $Adb @('-s',$Serial,'pull',$Remote,$tmp)
+        if (-not (Test-Path -LiteralPath $tmp)) { throw "拉取界面 XML 失败：$pull" }
+        $text=[IO.File]::ReadAllText($tmp,[Text.Encoding]::UTF8)
+        if ($LocalPath) { [IO.File]::WriteAllText($LocalPath,$text,(New-Object Text.UTF8Encoding($false))) }
+        $text
+    } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+}
 function Test-ProductEndpoint([string]$Endpoint) {
     if ($Endpoint -notmatch '^(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$') { return $false }
     $ip=$null
